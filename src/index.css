@@ -1,0 +1,98 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 99%;
+    --foreground: 215 28% 17%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 28% 17%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 28% 17%;
+
+    --primary: 220 76% 48%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 160 84% 34%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 210 40% 96%;
+    --accent-foreground: 215 28% 17%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 160 84% 34%;
+    --success-foreground: 0 0% 100%;
+
+    --gold: 38 92% 50%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 220 76% 48%;
+
+    --radius: 0.75rem;
+
+    --heading: 215 28% 6%;
+    --body: 215 20% 30%;
+
+    --blue-card-bg: 213 100% 97%;
+    --blue-card-border: 220 76% 48%;
+    --green-card-bg: 140 100% 97%;
+    --green-card-border: 160 84% 34%;
+    --neutral-card-bg: 210 20% 98%;
+    --neutral-card-border: 213 18% 78%;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-body font-sans antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply text-heading font-bold;
+  }
+}
+
+@layer utilities {
+  .fade-in {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .pulse-ring {
+    animation: pulseRing 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulseRing {
+    0% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.4); }
+    70% { box-shadow: 0 0 0 20px hsl(var(--primary) / 0); }
+    100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0); }
+  }
+}
