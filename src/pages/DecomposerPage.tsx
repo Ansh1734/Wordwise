@@ -477,7 +477,7 @@ export default function DecomposerPage() {
       parts.push({ text: d.suffix.label, color: "text-primary" });
     }
 
-    if (parts.length <= 1) {
+    if (parts.length === 0 || (parts.length === 1 && parts[0].text === d.word)) {
       return (
         <span className="text-heading font-bold">{d.word}</span>
       );

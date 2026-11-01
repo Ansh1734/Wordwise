@@ -131,28 +131,32 @@ async function requestWithTimeout(url: string, options: RequestInit = {}, timeou
 }
 
 export async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
+  const isPronunciationRequest = endpoint === '/pronunciation/analyze';
   const hasSupabaseSession = Boolean(supabase && typeof supabase.auth?.getSession === 'function');
 
-  if (!hasSupabaseSession) {
+  if (!hasSupabaseSession && !isPronunciationRequest) {
     return buildOfflineResponse(endpoint, options);
   }
 
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token || DEMO_TOKEN;
+    const session = hasSupabaseSession
+      ? (await supabase.auth.getSession()).data.session
+      : null;
+    const token = session?.access_token || (isPronunciationRequest ? null : DEMO_TOKEN);
     const headers = {
       ...options.headers,
-      Authorization: `Bearer ${token}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     } as Record<string, string>;
 
     if (!(options.body instanceof FormData)) {
       headers['Content-Type'] = 'application/json';
     }
 
-    const response = await requestWithTimeout(`${API_BASE_URL}${endpoint}`, {
-      ...options,
-      headers,
-    });
+    const response = await requestWithTimeout(
+      `${API_BASE_URL}${endpoint}`,
+      { ...options, headers },
+      isPronunciationRequest ? 180000 : 8000
+    );
 
     if (!response.ok) {
       let errorMessage = 'An error occurred with the API request.';
@@ -163,7 +167,7 @@ export async function fetchWithAuth(endpoint: string, options: RequestInit = {})
         // Ignore if not JSON
       }
 
-      if (response.status >= 500 || response.status === 404) {
+      if (!isPronunciationRequest && (response.status >= 500 || response.status === 404)) {
         return buildOfflineResponse(endpoint, options);
       }
 
@@ -172,6 +176,15 @@ export async function fetchWithAuth(endpoint: string, options: RequestInit = {})
 
     return response.json();
   } catch (error) {
+    if (isPronunciationRequest) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Speech analysis timed out. The local model may still be downloading; wait a moment and try again.');
+      }
+      if (error instanceof TypeError) {
+        throw new Error('Cannot reach the speech-analysis backend. Start the WordWise backend on localhost:8000, then try again.');
+      }
+      throw error;
+    }
     if (error instanceof Error && error.name === 'AbortError') {
       return buildOfflineResponse(endpoint, options);
     }

@@ -413,7 +413,28 @@ async function fallbackSearchWord(word: string): Promise<FullWordEntry> {
   };
 }
 
-const MORPHEME_FALLBACKS: Record<string, { prefix: string; root: string; suffix: string; definition: string; example: string; partOfSpeech: string; etymology: string; }> = {
+const MORPHEME_FALLBACKS: Record<string, {
+  prefix: string;
+  root: string;
+  suffix: string;
+  definition: string;
+  example: string;
+  partOfSpeech: string;
+  etymology: string;
+  rootMeaning?: string;
+  rootOrigin?: string;
+}> = {
+  comeback: {
+    prefix: "",
+    root: "come + back",
+    suffix: "",
+    definition: "A return to success, popularity, or activity after a period of difficulty or obscurity.",
+    example: "After years away from the stage, the singer made a remarkable comeback.",
+    partOfSpeech: "noun",
+    rootMeaning: "A compound formed from the words “come” and “back.”",
+    rootOrigin: "Old English",
+    etymology: "A compound of “come” and “back,” originally describing a return."
+  },
   photosynthesis: {
     prefix: "photo-",
     root: "synthesis",
@@ -432,9 +453,18 @@ const MORPHEME_FALLBACKS: Record<string, { prefix: string; root: string; suffix:
     partOfSpeech: "adjective",
     etymology: "The word is built from a negative prefix, a root about trust, and a suffix meaning capable of."
   },
+  international: {
+    prefix: "inter-",
+    root: "nation",
+    suffix: "-al",
+    definition: "Existing, occurring, or carried on between nations.",
+    example: "The organization promotes international cooperation.",
+    partOfSpeech: "adjective",
+    etymology: "Formed from Latin inter (“between”), nation, and the adjective-forming suffix -al."
+  },
   happiness: {
     prefix: "",
-    root: "happ",
+    root: "happy",
     suffix: "-ness",
     definition: "The state of feeling joy or pleasure.",
     example: "Her happiness was clear from her smile.",
@@ -449,6 +479,24 @@ const MORPHEME_FALLBACKS: Record<string, { prefix: string; root: string; suffix:
     example: "They decided to rebuild the bridge after the storm.",
     partOfSpeech: "verb",
     etymology: "The word uses a prefix meaning again and a root meaning construct."
+  },
+  kindness: {
+    prefix: "",
+    root: "kind",
+    suffix: "-ness",
+    definition: "The quality of being friendly, generous, and considerate.",
+    example: "Her kindness made the new student feel welcome.",
+    partOfSpeech: "noun",
+    etymology: "Formed from kind and the suffix -ness, which makes an abstract noun."
+  },
+  quickly: {
+    prefix: "",
+    root: "quick",
+    suffix: "-ly",
+    definition: "At a fast speed; rapidly.",
+    example: "She quickly finished her homework.",
+    partOfSpeech: "adverb",
+    etymology: "Formed from quick and the adverb-forming suffix -ly."
   },
 };
 
@@ -467,14 +515,41 @@ function getOfflineMorphemeFallback(word: string, fullEntry?: FullWordEntry | nu
       example: override.example || dictionaryEntry.example,
       meanings: dictionaryEntry.meanings || [{ partOfSpeech: override.partOfSpeech || dictionaryEntry.partOfSpeech || "noun", definitions: [{ definition: override.definition, example: override.example }], synonyms: [], antonyms: [] }],
       prefix: { label: override.prefix || "", origin: override.prefix ? "Greek/Latin prefix" : "", meaning: override.prefix ? "A meaningful word part added at the beginning." : "", related: override.prefix ? ["photograph", "photographing", "photoelectric"] : [], present: Boolean(override.prefix) },
-      root: { label: override.root || clean, origin: "Historical English / Greek origin", meaning: "The core meaning-bearing part of the word.", related: [clean], present: true },
+      root: { label: override.root || clean, origin: override.rootOrigin || "Core word part", meaning: override.rootMeaning || "The core meaning-bearing part of the word.", related: [clean], present: true },
       suffix: { label: override.suffix || "", origin: override.suffix ? "English word-forming suffix" : "", meaning: override.suffix ? "A meaningful word part added at the end." : "", related: override.suffix ? [clean, `${clean}ly`] : [], present: Boolean(override.suffix) },
       etymology: override.etymology || "The word is built from meaningful parts that help explain its structure and origin."
     };
   }
 
-  const prefixes = ["re-", "un-", "dis-", "mis-", "pre-", "post-", "sub-", "bio-", "photo-", "trans-"];
-  const suffixes = ["-tion", "-ment", "-ness", "-ly", "-ous", "-ity", "-ive", "-able", "-al", "-ing", "-ed"];
+  const prefixDetails: Record<string, { origin: string; meaning: string }> = {
+    "anti-": { origin: "Greek", meaning: "against or opposite to" },
+    "bio-": { origin: "Greek", meaning: "life or living things" },
+    "dis-": { origin: "Latin", meaning: "the opposite of, or apart" },
+    "inter-": { origin: "Latin", meaning: "between or among" },
+    "mis-": { origin: "Old English", meaning: "wrongly or badly" },
+    "photo-": { origin: "Greek", meaning: "light" },
+    "post-": { origin: "Latin", meaning: "after" },
+    "pre-": { origin: "Latin", meaning: "before" },
+    "re-": { origin: "Latin", meaning: "again or back" },
+    "sub-": { origin: "Latin", meaning: "under or below" },
+    "trans-": { origin: "Latin", meaning: "across or through" },
+    "un-": { origin: "Old English", meaning: "not, or the opposite of" },
+  };
+  const suffixDetails: Record<string, { origin: string; meaning: string }> = {
+    "-able": { origin: "Latin", meaning: "capable of or fit for" },
+    "-al": { origin: "Latin", meaning: "relating to" },
+    "-ed": { origin: "Old English", meaning: "having or having been" },
+    "-ing": { origin: "Old English", meaning: "an ongoing action or process" },
+    "-ity": { origin: "Latin", meaning: "a state or quality" },
+    "-ive": { origin: "Latin", meaning: "having the nature of" },
+    "-ly": { origin: "Old English", meaning: "in a particular manner" },
+    "-ment": { origin: "Latin", meaning: "an action, process, or result" },
+    "-ness": { origin: "Old English", meaning: "a state or quality" },
+    "-ous": { origin: "Latin", meaning: "full of or having" },
+    "-tion": { origin: "Latin", meaning: "an action, process, or result" },
+  };
+  const prefixes = Object.keys(prefixDetails).sort((a, b) => b.length - a.length);
+  const suffixes = Object.keys(suffixDetails).sort((a, b) => b.length - a.length);
   let prefix = "";
   let root = clean;
   let suffix = "";
@@ -491,8 +566,19 @@ function getOfflineMorphemeFallback(word: string, fullEntry?: FullWordEntry | nu
     if (root.endsWith(candidate) && root.length > candidate.length + 2) {
       suffix = candidate;
       root = root.slice(0, -candidate.length);
+      if (suffix === "-ness" && root.endsWith("i")) {
+        root = `${root.slice(0, -1)}y`;
+      } else if (suffix === "-able" && root.endsWith("v")) {
+        root += "e";
+      } else if ((suffix === "-ing" || suffix === "-ed") && /(.)\1$/.test(root)) {
+        root = root.slice(0, -1);
+      }
       break;
     }
+  }
+
+  if (prefix === "inter-" && suffix === "-al" && root === "nation") {
+    root = "nation";
   }
 
   if (!root || root === clean) {
@@ -511,8 +597,8 @@ function getOfflineMorphemeFallback(word: string, fullEntry?: FullWordEntry | nu
     meanings: dictionaryEntry.meanings || [{ partOfSpeech, definitions: [{ definition: dictionaryEntry.definition || `The word "${clean}" is used in English to communicate a specific idea or meaning.`, example: dictionaryEntry.example || `This word is commonly used in natural English sentences.` }], synonyms: [], antonyms: [] }],
     prefix: {
       label: prefix,
-      origin: prefix ? "Prefix from a historical root" : "",
-      meaning: prefix ? "A meaningful part added before the root to change or clarify the meaning." : "",
+      origin: prefix ? prefixDetails[prefix]?.origin ?? "Historical prefix" : "",
+      meaning: prefix ? prefixDetails[prefix]?.meaning ?? "A meaningful part added before the root." : "",
       related: prefix ? [clean, `${clean}ly`, `${clean}ness`] : [],
       present: Boolean(prefix)
     },
@@ -525,8 +611,8 @@ function getOfflineMorphemeFallback(word: string, fullEntry?: FullWordEntry | nu
     },
     suffix: {
       label: suffix,
-      origin: suffix ? "Word-forming suffix" : "",
-      meaning: suffix ? "A meaningful ending that changes how the word is used." : "",
+      origin: suffix ? suffixDetails[suffix]?.origin ?? "Historical suffix" : "",
+      meaning: suffix ? suffixDetails[suffix]?.meaning ?? "A meaningful ending that changes how the word is used." : "",
       related: suffix ? [clean, `${clean}ly`] : [],
       present: Boolean(suffix)
     },
@@ -558,9 +644,8 @@ async function fetchWithRetry(
   }
 }
 
-const PRIMARY_GEMINI_MODEL = "gemini-3.6-flash";
-const FALLBACK_GEMINI_MODEL = "gemini-3.5-flash";
-const LAST_RESORT_GEMINI_MODEL = "gemini-flash-latest";
+const PRIMARY_GEMINI_MODEL = "gemini-flash-latest";
+const FALLBACK_GEMINI_MODEL = "gemini-2.5-flash";
 
 async function executeGeminiJson<T>(prompt: string): Promise<T> {
   const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY;
@@ -586,7 +671,7 @@ async function executeGeminiJson<T>(prompt: string): Promise<T> {
     return JSON.parse(text) as T;
   };
 
-  const models = [PRIMARY_GEMINI_MODEL, FALLBACK_GEMINI_MODEL, LAST_RESORT_GEMINI_MODEL];
+  const models = [PRIMARY_GEMINI_MODEL, FALLBACK_GEMINI_MODEL];
   let lastError: any = null;
 
   for (const model of models) {
@@ -608,12 +693,21 @@ async function executeGeminiJson<T>(prompt: string): Promise<T> {
  * Returns a DecomposedWord that merges Dictionary API data with Gemini morphology.
  */
 export async function decomposeWord(word: string): Promise<DecomposedWord> {
-  const fullEntry = await searchWord(word).catch(() => null);
+  const target = word.trim();
+  if (!target || !/^[a-z]+(?:[-'][a-z]+)*$/i.test(target)) {
+    throw new Error("Enter a single English word using letters, hyphens, or apostrophes.");
+  }
+
+  const fullEntry = await searchWord(target).catch(() => null);
+
+  if (MORPHEME_FALLBACKS[target.toLowerCase()]) {
+    return getOfflineMorphemeFallback(target, fullEntry);
+  }
 
   try {
     const prompt = `You are an expert English etymologist and linguist.
 
-For the word "${word}", provide a detailed morphological (morpheme) decomposition.
+For the word "${target}", provide a detailed morphological (morpheme) decomposition.
 
 Return ONLY a valid JSON object (no markdown, no backticks) with this exact schema:
 {
@@ -653,7 +747,7 @@ Important rules:
     const morphemes = await executeGeminiJson<any>(prompt);
 
     return {
-      word: fullEntry?.word ?? word,
+      word: fullEntry?.word ?? target,
       phonetic: fullEntry?.phonetic ?? "",
       audioUrl: fullEntry?.audioUrl ?? "",
       partOfSpeech: fullEntry?.partOfSpeech || morphemes.partOfSpeech || "",
@@ -667,7 +761,7 @@ Important rules:
     };
   } catch (error) {
     console.warn("Gemini decomposer unavailable, using local offline decomposition.", error);
-    return getOfflineMorphemeFallback(word, fullEntry);
+    return getOfflineMorphemeFallback(target, fullEntry);
   }
 }
 

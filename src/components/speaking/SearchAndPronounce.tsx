@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search, Volume2, Mic, RotateCcw, Square, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { searchWord } from "@/lib/dictionary";
 import { toast } from "sonner";
 import { speak } from "@/lib/tts";
-import { pronunciationAssessment } from "@/services/nlp/pronunciationAssessment";
+import { pronunciationApi } from "@/services/api";
 
 export default function SearchAndPronounce() {
   const [query, setQuery] = useState("");
@@ -15,20 +15,45 @@ export default function SearchAndPronounce() {
   const [hasRecorded, setHasRecorded] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [practiceResult, setPracticeResult] = useState<any>(null);
-  const [nlpFeedback, setNlpFeedback] = useState<string | null>(null);
-  const [isNlpAnalyzing, setIsNlpAnalyzing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimeoutRef = useRef<number | null>(null);
+
+  const clearRecordingTimeout = () => {
+    if (recordingTimeoutRef.current !== null) {
+      window.clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
+  };
+
+  useEffect(() => () => {
+    clearRecordingTimeout();
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.onstop = null;
+      if (mediaRecorderRef.current.state === "recording") mediaRecorderRef.current.stop();
+    }
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
     
+    clearRecordingTimeout();
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.onstop = null;
+      if (mediaRecorderRef.current.state === "recording") mediaRecorderRef.current.stop();
+    }
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaRecorderRef.current = null;
+    mediaStreamRef.current = null;
     setLoading(true);
     setResult(null);
     setPracticeResult(null);
     setHasRecorded(false);
     setIsAnalyzing(false);
     setIsRecording(false);
-    setNlpFeedback(null);
     
     try {
       const data = await searchWord(query);
@@ -52,71 +77,117 @@ export default function SearchAndPronounce() {
   };
 
   const handlePracticeRecord = () => {
-    if (!window.SpeechRecognition && !(window as any).webkitSpeechRecognition) {
-      toast.error("Speech recognition is not supported in this browser.");
+    setHasRecorded(false);
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      toast.error("Audio recording is not supported in this browser. Use the latest Chrome or Edge.");
       return;
     }
 
-    const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 3;
-
-    setIsRecording(true);
-    setHasRecorded(false);
-    setNlpFeedback(null);
-
-    recognition.onresult = async (event: any) => {
-      const targetWord = result.word.toLowerCase();
-      const results = event.results[0];
-      
-      let bestTranscript = results[0].transcript.toLowerCase();
-
-      setIsRecording(false);
-      setIsAnalyzing(true);
-      
-      try {
-        const assessment = await pronunciationAssessment.analyze({
-          targetWord,
-          expectedPhonetic: result.phonetic,
-          transcript: bestTranscript,
-          recognitionConfidence: results[0].confidence
-        });
-
-        setPracticeResult({
-          score: assessment.pronunciationScore,
-          matched: assessment.isAcceptable,
-          confidence: assessment.recognitionConfidence,
-          transcript: bestTranscript,
-          feedback: assessment.feedback,
-          problemAreas: assessment.problemAreas,
-          expectedPhonetic: assessment.expectedPhonetic
-        });
-        
-        setHasRecorded(true);
-      } catch (err) {
-        console.error("Pronunciation assessment failed", err);
-        toast.error("Failed to analyze pronunciation.");
-      } finally {
-        setIsAnalyzing(false);
-      }
-    };
-
-    recognition.onerror = () => {
-      setIsRecording(false);
-      toast.error("Could not record properly. Please try again.");
-    };
-
-    recognition.start();
-    
-    // Auto stop after 2.5 seconds
-    setTimeout(() => {
-      if (isRecording) {
-        recognition.stop();
+    clearRecordingTimeout();
+    navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: true,
+      },
+    }).then((stream) => {
+      mediaStreamRef.current = stream;
+      audioChunksRef.current = [];
+      const mimeType = typeof MediaRecorder.isTypeSupported === "function"
+        ? ["audio/webm;codecs=opus", "audio/webm", "audio/ogg", "audio/mp4"]
+          .find((type) => MediaRecorder.isTypeSupported(type))
+        : undefined;
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      recorder.onerror = () => {
+        clearRecordingTimeout();
+        stream.getTracks().forEach((track) => track.stop());
+        mediaRecorderRef.current = null;
+        mediaStreamRef.current = null;
         setIsRecording(false);
+        toast.error("Microphone recording failed. Check your microphone and try again.");
+      };
+      recorder.onstop = async () => {
+        clearRecordingTimeout();
+        stream.getTracks().forEach((track) => track.stop());
+        setIsRecording(false);
+        const audio = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || mimeType || "audio/webm",
+        });
+        mediaRecorderRef.current = null;
+        mediaStreamRef.current = null;
+        if (audio.size < 1000) {
+          toast.error("The recording was too short. Say the word for at least one second, then stop.");
+          return;
+        }
+
+        setIsAnalyzing(true);
+        try {
+          const analysis = await pronunciationApi.analyzePronunciation(
+            result.word,
+            audio,
+            `practice.${audio.type.includes("mp4") ? "mp4" : audio.type.includes("ogg") ? "ogg" : "webm"}`
+          );
+          const transcript = typeof analysis.transcript === "string" ? analysis.transcript.trim() : "";
+          const score = Number(analysis.score);
+          if (!Number.isFinite(score)) {
+            throw new Error("The speech analyzer returned an invalid score.");
+          }
+          setPracticeResult({
+            score: Math.max(0, Math.min(100, Math.round(score))),
+            matched: score >= 70,
+            transcript: transcript || "No speech detected",
+            feedback: analysis.feedback || (transcript
+              ? "Speech analyzed."
+              : "No clear speech was detected. Speak toward the microphone and try again."),
+            problemAreas: Array.isArray(analysis.problemAreas) ? analysis.problemAreas : [],
+            expectedPhonetic: result.phonetic,
+          });
+          setHasRecorded(true);
+        } catch (error) {
+          console.error("Pronunciation backend analysis failed", error);
+          toast.error(error instanceof Error ? error.message : "Pronunciation analysis failed. Please try again.");
+        } finally {
+          setIsAnalyzing(false);
+        }
+      };
+
+      try {
+        recorder.start(250);
+        setIsRecording(true);
+        recordingTimeoutRef.current = window.setTimeout(() => {
+          if (recorder.state === "recording") recorder.stop();
+        }, 8000);
+      } catch (error) {
+        stream.getTracks().forEach((track) => track.stop());
+        mediaRecorderRef.current = null;
+        mediaStreamRef.current = null;
+        setIsRecording(false);
+        console.error("Could not start audio recording", error);
+        toast.error("Could not start the microphone. Check browser permissions and try again.");
       }
-    }, 2500);
+    }).catch((error: unknown) => {
+      clearRecordingTimeout();
+      setIsRecording(false);
+      console.error("Could not access microphone", error);
+      if (error instanceof DOMException && error.name === "NotAllowedError") {
+        toast.error("Microphone access was denied. Allow microphone access for localhost in browser settings, then try again.");
+      } else if (error instanceof DOMException && error.name === "NotFoundError") {
+        toast.error("No microphone was found. Connect a microphone and try again.");
+      } else {
+        toast.error(error instanceof Error ? error.message : "Could not access the microphone. Try again.");
+      }
+    });
+  };
+
+  const stopPracticeRecord = () => {
+    clearRecordingTimeout();
+    if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop();
+    setIsRecording(false);
   };
 
   return (
@@ -163,13 +234,16 @@ export default function SearchAndPronounce() {
           <div className="border-t border-border pt-8 text-center space-y-6">
             <div>
               <h3 className="text-xl font-bold text-heading">Practice this word</h3>
-              <p className="text-muted-foreground text-sm mt-1">Tap the mic and repeat the word clearly.</p>
+              <p className="text-muted-foreground text-sm mt-1">
+                {isRecording ? "Say the word clearly, then tap stop (or wait for the 8-second timer)." : "Tap the mic, say the word for at least one second, then tap stop for a pronunciation score."}
+              </p>
             </div>
             
             <div className="flex flex-col items-center justify-center gap-6">
               <button
-                onClick={handlePracticeRecord}
-                disabled={isRecording || isAnalyzing}
+                onClick={isRecording ? stopPracticeRecord : handlePracticeRecord}
+                disabled={isAnalyzing}
+                aria-label={isRecording ? "Stop pronunciation recording" : "Start pronunciation recording"}
                 className={`flex h-20 w-20 items-center justify-center rounded-full transition-all ${
                   isRecording 
                     ? "bg-destructive text-destructive-foreground pulse-ring scale-110 shadow-[0_0_20px_rgba(239,68,68,0.5)]" 
@@ -199,7 +273,7 @@ export default function SearchAndPronounce() {
               
               {isAnalyzing && (
                 <div className="flex flex-col items-center gap-2 fade-in text-primary">
-                  <span className="text-sm font-medium animate-pulse">NLP Model Analyzing Pronunciation...</span>
+                  <span className="text-sm font-medium animate-pulse">Analyzing your recording...</span>
                 </div>
               )}
             </div>

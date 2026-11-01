@@ -285,9 +285,8 @@ export async function expandNewsArticle(title: string, snippet: string) {
 
 export async function analyzePronunciationWithGemini(targetWord: string, transcript: string, expectedPhonetic?: string) {
   const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-  const PRIMARY_MODEL = "gemini-3.6-flash";
-  const FALLBACK_MODEL = "gemini-3.5-flash";
-  const LAST_RESORT_MODEL = "gemini-flash-latest";
+  const PRIMARY_MODEL = "gemini-flash-latest";
+  const FALLBACK_MODEL = "gemini-2.5-flash";
 
   if (!API_KEY) {
     return buildLocalPronunciationAnalysis(targetWord, transcript);
@@ -337,7 +336,7 @@ export async function analyzePronunciationWithGemini(targetWord: string, transcr
     return JSON.parse(resultText.trim());
   };
 
-  const models = [PRIMARY_MODEL, FALLBACK_MODEL, LAST_RESORT_MODEL];
+  const models = [PRIMARY_MODEL, FALLBACK_MODEL];
 
   for (const model of models) {
     try {
@@ -348,4 +347,105 @@ export async function analyzePronunciationWithGemini(targetWord: string, transcr
   }
 
   return buildLocalPronunciationAnalysis(targetWord, transcript);
+}
+
+export async function analyzePronunciationAudio(
+  targetWord: string,
+  audioBlob: Blob,
+  expectedPhonetic?: string
+): Promise<{ score: number; transcript: string; feedback: string; problemAreas: string[] }> {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("Pronunciation feedback needs a Gemini API key. Add VITE_GEMINI_API_KEY to the project .env file, then restart the development server.");
+  }
+  if (audioBlob.size === 0) {
+    throw new Error("No audio was captured. Check your microphone and try again.");
+  }
+
+  const bytes = new Uint8Array(await audioBlob.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  const audioData = btoa(binary);
+  const mimeType = audioBlob.type.split(";")[0] || "audio/webm";
+  const prompt = `You are an English pronunciation coach. Listen to the attached audio of a learner trying to pronounce "${targetWord}".
+${expectedPhonetic ? `Expected pronunciation (IPA): ${expectedPhonetic}` : ""}
+Assess the actual audio, not a speech-to-text transcript alone. Return JSON only:
+{"score":0,"transcript":"","feedback":"","problemAreas":[]}
+Score the pronunciation from 0 to 100. Transcribe what you hear. If there is no intelligible speech, use score 0, an empty transcript, and explain that no speech was audible. Give concise, specific feedback about sounds or stress; problemAreas must be an array of short strings.`;
+
+  const body = JSON.stringify({
+    contents: [{
+      parts: [
+        { text: prompt },
+        { inlineData: { mimeType, data: audioData } },
+      ],
+    }],
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  let lastError: Error | null = null;
+  for (const model of ["gemini-2.5-flash", "gemini-flash-latest"]) {
+    try {
+      const response = await fetchWithRetry(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body }
+      );
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const apiMessage = String(errorData.error?.message || "");
+        const normalizedMessage = apiMessage.toLowerCase();
+        if (
+          response.status === 400 &&
+          (normalizedMessage.includes("api key not valid") ||
+            normalizedMessage.includes("api_key_invalid") ||
+            normalizedMessage.includes("invalid api key"))
+        ) {
+          throw new Error("Google rejected the Gemini API key. Create or copy a valid Gemini API key from Google AI Studio, replace VITE_GEMINI_API_KEY in the project .env file, and restart the development server.");
+        }
+        if (response.status === 403) {
+          throw new Error("Google denied Gemini API access. Check that the Generative Language API is enabled and that this key's restrictions allow it.");
+        }
+        if (response.status === 429) {
+          throw new Error("The Gemini API quota or rate limit was reached. Check the project's Google AI Studio quota and try again later.");
+        }
+        throw new Error(apiMessage || `Pronunciation analysis failed (${response.status}).`);
+      }
+
+      const data = await response.json();
+      const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!resultText) throw new Error("The pronunciation service returned no analysis.");
+
+      const result = JSON.parse(resultText) as Partial<{
+        score: number;
+        transcript: string;
+        feedback: string;
+        problemAreas: string[];
+      }>;
+      if (typeof result.score !== "number" || !Number.isFinite(result.score)) {
+        throw new Error("The pronunciation service returned an invalid score.");
+      }
+
+      return {
+        score: Math.max(0, Math.min(100, Math.round(result.score))),
+        transcript: typeof result.transcript === "string" ? result.transcript.trim() : "",
+        feedback: typeof result.feedback === "string" ? result.feedback : "",
+        problemAreas: Array.isArray(result.problemAreas)
+          ? result.problemAreas.filter((area): area is string => typeof area === "string")
+          : [],
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Pronunciation analysis failed.");
+      if (
+        lastError.message.startsWith("Google rejected the Gemini API key.") ||
+        lastError.message.startsWith("Google denied Gemini API access.")
+      ) {
+        throw lastError;
+      }
+    }
+  }
+
+  throw lastError ?? new Error("Pronunciation analysis failed.");
 }
